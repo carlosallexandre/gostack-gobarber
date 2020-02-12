@@ -1,10 +1,15 @@
+// Third-party libs
 import * as Yup from 'yup';
-import { startOfHour, parseISO, isBefore, format } from 'date-fns';
+import { startOfHour, parseISO, isBefore, format, subHours } from 'date-fns';
 import pt from 'date-fns/locale/pt';
+// Models
 import Apointment from '../models/Apointment';
 import User from '../models/User';
 import File from '../models/File';
-
+// Jobs
+import Queue from '../../lib/Queue';
+import CancellationMail from '../jobs/CancellationMail';
+// Schemas
 import Notification from '../schemas/Notification';
 
 class ApointmentController {
@@ -16,7 +21,7 @@ class ApointmentController {
       order: ['date'],
       limit: 20,
       offset: (page - 1) * 20,
-      attributes: ['id', 'date'],
+      attributes: ['past', 'cancelable', 'id', 'date'],
       include: [
         {
           model: User,
@@ -96,7 +101,7 @@ class ApointmentController {
     if (checkAvailability) {
       return res
         .status(400)
-        .json({ error: 'Apointment date is not availabel.' });
+        .json({ error: 'Apointment date is not available.' });
     }
 
     /*
@@ -124,6 +129,45 @@ class ApointmentController {
     });
 
     return res.json(apointment);
+  }
+
+  async delete(req, res) {
+    const appointment = await Apointment.findByPk(req.params.id, {
+      include: [
+        {
+          model: User,
+          as: 'provider',
+          attributes: ['name', 'email'],
+        },
+        {
+          model: User,
+          as: 'user',
+          attributes: ['name'],
+        },
+      ],
+    });
+
+    if (appointment.user_id !== req.userId) {
+      return res.status(401).json({
+        error: "You don't have permission to cancel this appointment.",
+      });
+    }
+
+    const dateWithSub = subHours(appointment.date, 2);
+
+    if (isBefore(dateWithSub, new Date())) {
+      return res.status(401).json({
+        error: 'You can only cancel appointments 2 hours in advance.',
+      });
+    }
+
+    appointment.canceled_at = new Date();
+
+    await appointment.save();
+
+    await Queue.add(CancellationMail.key, { appointment });
+
+    return res.json(appointment);
   }
 }
 
