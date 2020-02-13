@@ -17,11 +17,14 @@ class UserController {
       return res.status(400).json({ error: 'Validation fails.' });
     }
 
-    User.create(req.body)
-      .then(({ id, name, email, provider }) => {
-        res.json({ id, name, email, provider });
-      })
-      .catch(error => res.status(400).json({ error }));
+    const { id, name, email, provider } = await User.create(req.body);
+
+    return res.json({
+      id,
+      name,
+      email,
+      provider,
+    });
   }
 
   async update(req, res) {
